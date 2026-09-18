@@ -5,6 +5,10 @@ situations. It combines a custom equity engine (exact enumeration and Monte Carl
 simulation) with weighted opponent ranges, expected-value and pot-odds analysis,
 and deterministic decision explanations, all in an interactive Streamlit UI.
 
+## Live Demo
+
+The public Streamlit Community Cloud link will go here after the first deployment.
+
 ![EquityLab home page](assets/screenshots/equitylab-home.png)
 
 ## Features
@@ -74,7 +78,29 @@ python3 -m streamlit run app.py
 ```
 
 Then open the local URL Streamlit prints, usually `http://localhost:8501`.
-Python 3.12 or newer is required.
+Python 3.12 or newer is required. These are the same install and launch commands
+used by Streamlit Community Cloud, with `app.py` as the entry point.
+
+## Deploying to Streamlit Community Cloud
+
+This repository is ready to deploy directly from the `main` branch:
+
+1. Sign in to [Streamlit Community Cloud](https://share.streamlit.io/) with GitHub.
+2. Click **Create app**, then choose **Yup, I have an app**.
+3. Select repository `siddharth-iyer201/EquityLab`.
+4. Set the branch to `main` and the entry point to `app.py`.
+5. Choose Python 3.12 in **Advanced settings**. No secrets or external packages
+   are required.
+6. Choose an available app URL and click **Deploy**.
+7. Once the app is live, replace the sentence in **Live Demo** above with a
+   prominent link to the assigned `streamlit.app` URL.
+
+Streamlit Community Cloud runs the app from the repository root and installs
+`requirements.txt`. Hand history and saved ranges use `hand_history.db`, a local
+SQLite file created at runtime. On Community Cloud this storage is ephemeral and
+shared by visitors to the same app instance: it can be cleared when the app
+restarts, redeploys, or moves, and it is not suitable for private or durable data.
+The demo does not require secrets.
 
 ## Testing
 
