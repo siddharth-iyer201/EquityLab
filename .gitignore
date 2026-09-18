@@ -1,0 +1,10 @@
+.DS_Store
+*.local
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.streamlit/secrets.toml
+hand_history.db
+*.db
