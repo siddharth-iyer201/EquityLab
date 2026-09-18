@@ -7,7 +7,7 @@ and deterministic decision explanations, all in an interactive Streamlit UI.
 
 ## Live Demo
 
-The public Streamlit Community Cloud link will go here after the first deployment.
+[Open the live EquityLab app](https://equity-lab.streamlit.app/)
 
 ![EquityLab home page](assets/screenshots/equitylab-home.png)
 
