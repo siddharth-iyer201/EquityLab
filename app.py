@@ -25,7 +25,7 @@ if getattr(hand_history_store, "STORE_VERSION", 0) < 5:
     hand_history_store = importlib.reload(hand_history_store)
 if getattr(equity_heatmap, "HEATMAP_MODULE_VERSION", 0) < 2:
     equity_heatmap = importlib.reload(equity_heatmap)
-if getattr(decision_analysis, "DECISION_ANALYSIS_VERSION", 0) < 2:
+if getattr(decision_analysis, "DECISION_ANALYSIS_VERSION", 0) < 3:
     decision_analysis = importlib.reload(decision_analysis)
 
 from poker_engine import (
@@ -55,11 +55,13 @@ from decision_analysis import (
     build_decision_explanation as _pure_build_decision_explanation,
     build_decision_sensitivity as _pure_build_decision_sensitivity,
     confidence_level as _pure_confidence_level,
+    decision_stability as _pure_decision_stability,
     equity_margin as _pure_equity_margin,
     format_monte_carlo_equity_ci as _pure_format_monte_carlo_equity_ci,
 )
 from hand_history_store import (
     DuplicateRangeNameError,
+    delete_hand_history_entry_by_id,
     delete_saved_range_by_id,
     get_hand_history_entry,
     get_saved_range_by_id,
@@ -2139,16 +2141,48 @@ def _render_hand_history_tab() -> None:
         st.html(_hand_history_empty_state_html())
         return
 
+    flash = st.session_state.pop("hand_history_action_flash", None)
+    if flash:
+        st.success(flash)
+
     st.html(_hand_history_styles())
+    pending_delete_id = st.session_state.get("pending_history_delete_id")
     for entry in entries:
+        entry_id = int(entry["id"])
         st.html(_hand_history_card_html(entry))
-        st.button(
+        load_col, delete_col = st.columns([3, 1])
+        load_col.button(
             "Load Analysis",
-            key=f"load-analysis-{entry['id']}",
+            key=f"load-analysis-{entry_id}",
             on_click=_load_hand_history_analysis,
-            args=(entry["id"],),
+            args=(entry_id,),
             use_container_width=True,
         )
+        delete_col.button(
+            "Delete",
+            key=f"delete-analysis-{entry_id}",
+            on_click=_request_history_entry_delete,
+            args=(entry_id,),
+            use_container_width=True,
+        )
+
+        if pending_delete_id == entry_id:
+            st.warning("Delete this saved analysis? This cannot be undone.")
+            confirm_col, cancel_col = st.columns(2)
+            confirm_col.button(
+                "Delete permanently",
+                key=f"confirm-delete-analysis-{entry_id}",
+                type="primary",
+                on_click=_confirm_history_entry_delete,
+                args=(entry_id,),
+                use_container_width=True,
+            )
+            cancel_col.button(
+                "Cancel",
+                key=f"cancel-delete-analysis-{entry_id}",
+                on_click=_cancel_history_entry_delete,
+                use_container_width=True,
+            )
 
 
 def _hand_history_styles() -> str:
@@ -2245,6 +2279,25 @@ def _hand_history_styles() -> str:
         font-weight: 600;
         line-height: 1.35;
         word-break: break-word;
+      }
+      [class*="st-key-load-analysis-"] button,
+      [class*="st-key-delete-analysis-"] button,
+      [class*="st-key-cancel-delete-analysis-"] button {
+        background: rgba(30, 41, 59, 0.92) !important;
+        border-color: rgba(148, 163, 184, 0.55) !important;
+        color: #f8fafc !important;
+      }
+      [class*="st-key-load-analysis-"] button:hover,
+      [class*="st-key-delete-analysis-"] button:hover,
+      [class*="st-key-cancel-delete-analysis-"] button:hover {
+        background: rgba(51, 65, 85, 0.95) !important;
+        border-color: rgba(226, 232, 240, 0.72) !important;
+        color: #ffffff !important;
+      }
+      [class*="st-key-load-analysis-"] button p,
+      [class*="st-key-delete-analysis-"] button p,
+      [class*="st-key-cancel-delete-analysis-"] button p {
+        color: inherit !important;
       }
     </style>
     """
@@ -2370,7 +2423,7 @@ def _render_about_tab() -> None:
             using the selected trial count.
 
             ### Quality
-            EquityLab ships with **91 automated tests** covering the evaluator, weighted ranges,
+            EquityLab ships with an automated test suite covering the evaluator, weighted ranges,
             board texture, decision explanation, and equity heatmap caching.
             """
         )
@@ -3744,6 +3797,36 @@ def _decision_confidence_banner(confidence: str) -> tuple[str, str]:
     return mapping.get(confidence, ("⚪", "neutral"))
 
 
+def _decision_stability_html(result, decision) -> str:
+    """Render Monte Carlo decision stability against the break-even threshold."""
+    if str(getattr(result, "mode", "")) != "monte-carlo":
+        return ""
+    completed = int(getattr(result, "boards_evaluated", 0) or 0)
+    if completed <= 1:
+        return ""
+
+    stability = _pure_decision_stability(
+        float(result.equity), float(decision.required_equity), completed
+    )
+    stability_mod = "overlap" if stability.threshold_overlaps else "stable"
+    stability_copy = (
+        "The approximate 95% Monte Carlo confidence interval crosses the break-even threshold. "
+        "Use more trials or treat this as a close decision."
+        if stability.threshold_overlaps
+        else "The full approximate 95% Monte Carlo confidence interval stays on the same side of break-even."
+    )
+    return (
+        f'<div class="decision-stability decision-stability-{stability_mod}">'
+        f'<div class="decision-stability-title">Simulation-aware check: '
+        f'{escape(stability.label)}</div>'
+        f'<p>{escape(stability_copy)}</p>'
+        f'<span>{escape(_format_percent(stability.lower_equity))}–'
+        f'{escape(_format_percent(stability.upper_equity))} vs '
+        f'{escape(_format_percent(float(decision.required_equity)))} required</span>'
+        f'</div>'
+    )
+
+
 def _render_decision_explanation(result, decision) -> None:
     equity_margin = _decision_equity_margin(result, decision)
     confidence = _decision_confidence_level(equity_margin)
@@ -3759,6 +3842,8 @@ def _render_decision_explanation(result, decision) -> None:
     }
     why_bullets = _decision_why_bullets(analysis)
     why_items = "".join(f"<li>{escape(b)}</li>" for b in why_bullets)
+
+    stability_html = _decision_stability_html(result, decision)
 
     # Optional draw context — never claim draws alone make the call +EV.
     draw_note = ""
@@ -3791,6 +3876,7 @@ def _render_decision_explanation(result, decision) -> None:
             f'<ul class="decision-why-list">{why_items}</ul>'
             f"</div>"
             f'<p class="decision-explanation">{escape(explanation)}</p>'
+            f"{stability_html}"
             f"{draw_note}"
             f'<p class="decision-sensitivity">{escape(sensitivity)}</p>'
             f"</div>",
@@ -4472,8 +4558,21 @@ def _delete_saved_range(range_id: int) -> None:
     st.session_state.saved_range_flash = "Range deleted."
 
 
-def _delete_history_entry(index: int) -> None:
-    del index  # Deleting from Hand History is not implemented yet.
+def _request_history_entry_delete(entry_id: int) -> None:
+    """Open an inline confirmation before deleting a saved analysis."""
+    st.session_state.pending_history_delete_id = int(entry_id)
+
+
+def _cancel_history_entry_delete() -> None:
+    st.session_state.pending_history_delete_id = None
+
+
+def _confirm_history_entry_delete(entry_id: int) -> None:
+    """Delete the confirmed analysis and clear the pending state."""
+    deleted = delete_hand_history_entry_by_id(int(entry_id))
+    st.session_state.pending_history_delete_id = None
+    if deleted:
+        st.session_state.hand_history_action_flash = "Saved analysis deleted."
 
 
 def _initialize_state() -> None:
@@ -6658,6 +6757,18 @@ def _inject_styles() -> None:
         .decision-confidence-fold .decision-confidence-value {{
             color: #fda4af;
         }}
+        .decision-stability {{
+            margin: 0.8rem 0 0;
+            padding: 0.8rem 0.9rem;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            border-radius: 0.55rem;
+            background: rgba(15, 23, 42, 0.55);
+        }}
+        .decision-stability-stable {{ border-color: rgba(52, 211, 153, 0.45); }}
+        .decision-stability-overlap {{ border-color: rgba(251, 191, 36, 0.55); }}
+        .decision-stability-title {{ color: #f8fafc; font-weight: 700; }}
+        .decision-stability p {{ margin: 0.3rem 0; color: #cbd5e1; }}
+        .decision-stability span {{ color: #94a3b8; font-size: 0.84rem; }}
         .decision-sensitivity {{
             margin: 0.65rem 0 0 0;
             color: #cbd5e1;

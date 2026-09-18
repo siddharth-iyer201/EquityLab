@@ -249,6 +249,18 @@ def get_hand_history_entry(entry_id: int) -> dict | None:
     return _row_to_hand_history_entry(row)
 
 
+def delete_hand_history_entry_by_id(entry_id: int) -> bool:
+    """Delete one saved analysis and report whether a row was removed."""
+    initialize_hand_history_db()
+    with _connect() as connection:
+        cursor = connection.execute(
+            "DELETE FROM hand_history WHERE id = ?",
+            (int(entry_id),),
+        )
+        connection.commit()
+    return cursor.rowcount > 0
+
+
 def _row_to_saved_range(row: sqlite3.Row) -> dict:
     try:
         payload = json.loads(row["hand_classes"])

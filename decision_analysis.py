@@ -32,7 +32,7 @@ import math
 from dataclasses import dataclass
 
 # Bump when this module's public API changes so Streamlit reloads it.
-DECISION_ANALYSIS_VERSION = 2
+DECISION_ANALYSIS_VERSION = 3
 
 # Confidence bands from |equity margin| (hero equity − required equity).
 # Keep all UI confidence copy derived from these two constants only.
@@ -59,6 +59,16 @@ class DecisionMetrics:
     call_ev: float
     recommendation: str
     confidence: str
+
+
+@dataclass(frozen=True)
+class DecisionStability:
+    """Whether Monte Carlo uncertainty can change the call/fold decision."""
+
+    label: str
+    lower_equity: float
+    upper_equity: float
+    threshold_overlaps: bool
 
 
 def required_equity(pot_size: float, call_amount: float) -> float:
@@ -146,6 +156,35 @@ def format_monte_carlo_equity_ci(
     half = monte_carlo_equity_ci_halfwidth(equity, samples, z=z)
     coverage = "95" if abs(float(z) - 1.96) < 1e-6 else f"{float(z):.2f}σ"
     return f"{format_percent(equity)} ± {half * 100.0:.1f}% ({coverage}% Monte Carlo CI)"
+
+
+def decision_stability(
+    equity: float,
+    required: float,
+    samples: int,
+    *,
+    z: float = 1.96,
+) -> DecisionStability:
+    """Classify whether a Monte Carlo interval stays on one side of break-even.
+
+    The recommendation itself still uses the point estimate. This helper only
+    reports whether ordinary sampling noise could move that estimate across the
+    required-equity threshold. Equality belongs to Call, matching the EV rule.
+    """
+    half = monte_carlo_equity_ci_halfwidth(equity, samples, z=z)
+    lower = max(0.0, float(equity) - half)
+    upper = min(1.0, float(equity) + half)
+    threshold = float(required)
+    if lower >= threshold:
+        label = "Stable Call"
+        overlaps = False
+    elif upper < threshold:
+        label = "Stable Fold"
+        overlaps = False
+    else:
+        label = "Threshold Overlap"
+        overlaps = True
+    return DecisionStability(label, lower, upper, overlaps)
 
 
 def build_decision_metrics(

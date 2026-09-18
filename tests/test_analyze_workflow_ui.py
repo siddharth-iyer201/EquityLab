@@ -232,5 +232,28 @@ class MonteCarloPresetTests(unittest.TestCase):
         self.assertIn("Select both hero cards to continue.", warning)
 
 
+class DecisionStabilityRenderingTests(unittest.TestCase):
+    def test_stable_and_overlap_cards_render_expected_copy(self) -> None:
+        stable = app._decision_stability_html(
+            SimpleNamespace(mode="monte-carlo", equity=0.60, boards_evaluated=10_000),
+            SimpleNamespace(required_equity=0.50),
+        )
+        overlap = app._decision_stability_html(
+            SimpleNamespace(mode="monte-carlo", equity=0.501, boards_evaluated=10_000),
+            SimpleNamespace(required_equity=0.50),
+        )
+        self.assertIn("Stable Call", stable)
+        self.assertIn("decision-stability-stable", stable)
+        self.assertIn("Threshold Overlap", overlap)
+        self.assertIn("decision-stability-overlap", overlap)
+
+    def test_exact_result_has_no_sampling_stability_card(self) -> None:
+        html = app._decision_stability_html(
+            SimpleNamespace(mode="exact", equity=0.60, boards_evaluated=10_000),
+            SimpleNamespace(required_equity=0.50),
+        )
+        self.assertEqual(html, "")
+
+
 if __name__ == "__main__":
     unittest.main()

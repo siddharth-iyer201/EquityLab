@@ -12,6 +12,7 @@ from decision_analysis import (
     build_decision_sensitivity,
     call_ev,
     confidence_level,
+    decision_stability,
     equity_margin,
     format_monte_carlo_equity_ci,
     format_percent,
@@ -235,6 +236,32 @@ class MonteCarloUncertaintyTests(unittest.TestCase):
     def test_zero_samples_yields_zero_error(self) -> None:
         self.assertEqual(monte_carlo_equity_standard_error(0.4, 0), 0.0)
         self.assertEqual(monte_carlo_equity_ci_halfwidth(0.4, 1), 0.0)
+
+
+class DecisionStabilityTests(unittest.TestCase):
+    def test_interval_entirely_above_threshold_is_stable_call(self) -> None:
+        result = decision_stability(0.60, 0.50, 10_000)
+        self.assertEqual(result.label, "Stable Call")
+        self.assertFalse(result.threshold_overlaps)
+        self.assertGreaterEqual(result.lower_equity, 0.50)
+
+    def test_interval_entirely_below_threshold_is_stable_fold(self) -> None:
+        result = decision_stability(0.40, 0.50, 10_000)
+        self.assertEqual(result.label, "Stable Fold")
+        self.assertFalse(result.threshold_overlaps)
+        self.assertLess(result.upper_equity, 0.50)
+
+    def test_interval_crossing_threshold_is_flagged(self) -> None:
+        result = decision_stability(0.501, 0.50, 10_000)
+        self.assertEqual(result.label, "Threshold Overlap")
+        self.assertTrue(result.threshold_overlaps)
+        self.assertLess(result.lower_equity, 0.50)
+        self.assertGreaterEqual(result.upper_equity, 0.50)
+
+    def test_equality_at_lower_bound_follows_call_rule(self) -> None:
+        # z=0 makes the interval exactly the point estimate. Equality is a Call.
+        result = decision_stability(0.50, 0.50, 10_000, z=0.0)
+        self.assertEqual(result.label, "Stable Call")
 
 
 if __name__ == "__main__":
